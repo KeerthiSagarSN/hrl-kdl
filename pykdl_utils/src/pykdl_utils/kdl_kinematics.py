@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Python3 compatible - Edited by Keerthi
 # Provides wrappers for PyKDL kinematics.
 #
@@ -116,6 +116,7 @@ class KDLKinematics(object):
 
         self._fk_kdl = kdl.ChainFkSolverPos_recursive(self.chain)
         self._ik_v_kdl = kdl.ChainIkSolverVel_pinv(self.chain)
+        self._ik_v_wdls_kdl = kdl.ChainIkSolverVel_wdls(self.chain)
         self._ik_p_kdl = kdl.ChainIkSolverPos_NR(self.chain, self._fk_kdl, self._ik_v_kdl)
         self._jac_kdl = kdl.ChainJntToJacSolver(self.chain)
         self._dyn_kdl = kdl.ChainDynParam(self.chain, kdl.Vector.Zero())
@@ -260,6 +261,53 @@ class KDLKinematics(object):
             return np.array(joint_kdl_to_list(q_kdl))
         else:
             return None
+
+
+# Inverse kinematics for a given pose, returning the joint angles required
+    # to obtain the target pose.
+    ###############3 Using weighted damped least square ############################
+    # @param pose Pose-like object represeting the target pose of the end effector.
+    # @param q_guess List of joint angles to seed the IK search.
+    # @param min_joints List of joint angles to lower bound the angles on the IK search.
+    #                   If None, the safety limits are used.
+    # @param max_joints List of joint angles to upper bound the angles on the IK search.
+    #                   If None, the safety limits are used.
+    # @param maxiter The maximum Newton-Raphson iterations.
+    #                If None, 100 is set. 
+    # @param eps     The precision for the position, used to end the iterations,
+    #                If None, epsilon is set. 
+    # @return np.array of joint angles needed to reach the pose or None if no solution was found.
+    def inverse_wdls(self, pose, q_guess=None, min_joints=None, max_joints=None, maxiter=100,\
+                eps=sys.float_info.epsilon):
+        pos, rot = PoseConv.to_pos_rot(pose)
+        pos_kdl = kdl.Vector(pos[0,0], pos[1,0], pos[2,0])
+        rot_kdl = kdl.Rotation(rot[0,0], rot[0,1], rot[0,2],
+                               rot[1,0], rot[1,1], rot[1,2],
+                               rot[2,0], rot[2,1], rot[2,2])
+        frame_kdl = kdl.Frame(rot_kdl, pos_kdl)
+        if min_joints is None:
+            min_joints = self.joint_safety_lower
+        if max_joints is None:
+            max_joints = self.joint_safety_upper
+        mins_kdl = joint_list_to_kdl(min_joints)
+        maxs_kdl = joint_list_to_kdl(max_joints)
+        ik_p_kdl = kdl.ChainIkSolverPos_NR_JL(self.chain, mins_kdl, maxs_kdl,\
+                                              self._fk_kdl, self._ik_v_wdls_kdl, maxiter, eps)
+
+        if np.any(q_guess == None):
+            # use the midpoint of the joint limits as the guess
+            lower_lim = np.where(np.isfinite(min_joints), min_joints, 0.)
+            upper_lim = np.where(np.isfinite(max_joints), max_joints, 0.)
+            q_guess = (lower_lim + upper_lim) / 2.0
+            q_guess = np.where(np.isnan(q_guess), [0.]*len(q_guess), q_guess)
+
+        q_kdl = kdl.JntArray(self.num_joints)
+        q_guess_kdl = joint_list_to_kdl(q_guess)
+        if ik_p_kdl.CartToJnt(q_guess_kdl, frame_kdl, q_kdl) >= 0:
+            return np.array(joint_kdl_to_list(q_kdl))
+        else:
+            return None
+
 
     ##
     # Repeats IK for different sets of random initial angles until a solution is found

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Python3 compatible - 
 # Python3 compatible - changed Jnt.None --> Jnt.Fixed
 # A parser for converting Python URDF objects into KDL Trees.
